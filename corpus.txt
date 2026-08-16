@@ -1,0 +1,11 @@
+Continuous batching schedules language-model serving at the iteration level. Orca (OSDI 2022) showed that request-level batches leave GPUs idle when short generations finish early; the fix is to admit waiting work into the active set every decode step. vLLM combines that idea with paged KV memory so sequences grow without contiguous padding waste.
+
+This inference server implements those serving primitives from scratch: a FIFO waiting queue, an active set capped by max_batch, and one forward step per tick that emits a single next token for every active job. Finished jobs retire onto a completion channel; HTTP threads only enqueue and wait. Prefill runs once when a job enters decode; later ticks reuse a KV cache.
+
+The generator is a tiny decoder-only Transformer, not a character bigram. Token and positional embeddings feed Pre-LN blocks with causal multi-head attention and a GELU MLP. The language-model head is weight-tied to the token embedding. Sampling uses temperature and nucleus top-p over the softmax of the last-position logits.
+
+OpenAI-shaped routes expose /v1/completions and /v1/chat/completions plus /health and /metrics. There is no authentication. Latency and token counters update after each completed request so operators can see tokens per second and mean latency without wrapping an external engine.
+
+The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs. Digits 0123456789 stay nearby. Spaces follow punctuation; the letter q is usually followed by u; common English words appear often enough for a two-layer network to memorize local patterns on this short corpus.
+
+Train on CPU or Apple MPS with named device paths. Export float32 weights into model/tiny_gpt.bin. The Rust server loads those weights and runs matmuls by hand. The Python fallback mirrors the same architecture so tests can exercise either backend. End of corpus.

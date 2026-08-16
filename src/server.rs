@@ -1,4 +1,4 @@
-//! HTTP/1.1 (std TcpListener) + OpenAI-ish routes + SSE + JSON errors.
+//! HTTP/1.1 (std TcpListener) + OpenAI-ish routes + SSE + JSON errors + /metrics.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use crate::json::{escape, Json};
 use crate::lm::{LanguageModel, Lcg};
+use crate::metrics::Metrics;
 use crate::scheduler::{Job, Scheduler};
 use crate::{DEFAULT_MAX_TOKENS, GEN_TIMEOUT_SECS, MAX_TOKENS_CAP};
 
@@ -22,6 +23,7 @@ pub struct Shared {
     pub engine: Mutex<Engine>,
     pub cv: Condvar,
     pub next_id: AtomicU64,
+    pub metrics: Metrics,
 }
 
 impl Shared {
@@ -33,6 +35,7 @@ impl Shared {
             }),
             cv: Condvar::new(),
             next_id: AtomicU64::new(1),
+            metrics: Metrics::default(),
         })
     }
 }
@@ -70,6 +73,7 @@ fn scheduler_loop(shared: Arc<Shared>) {
         }
         let Engine { lm, sched } = &mut *guard;
         sched.step(lm);
+        shared.metrics.tick_sched();
     }
 }
 
@@ -167,6 +171,7 @@ fn handle_client(mut stream: TcpStream, shared: &Arc<Shared>) -> Result<(), Stri
     let req = match read_request(&mut stream) {
         Ok(r) => r,
         Err(e) => {
+            shared.metrics.record_error();
             let _ = write_error(&mut stream, 400, "Bad Request", &e);
             return Ok(());
         }
@@ -175,9 +180,15 @@ fn handle_client(mut stream: TcpStream, shared: &Arc<Shared>) -> Result<(), Stri
         ("GET", "/health") => {
             write_http(&mut stream, 200, "OK", "application/json", br#"{"status":"ok"}"#)
         }
+        ("GET", "/metrics") => {
+            let body = shared.metrics.snapshot_json();
+            write_http(&mut stream, 200, "OK", "application/json", body.as_bytes())
+        }
         ("POST", "/v1/completions") => handle_completion(&mut stream, shared, &req.body, false),
         ("POST", "/v1/chat/completions") => handle_completion(&mut stream, shared, &req.body, true),
-        (m, _) if m != "GET" && m != "POST" => write_error(&mut stream, 405, "Method Not Allowed", "method not allowed"),
+        (m, _) if m != "GET" && m != "POST" => {
+            write_error(&mut stream, 405, "Method Not Allowed", "method not allowed")
+        }
         _ => write_error(&mut stream, 404, "Not Found", "not found"),
     }
 }
@@ -219,7 +230,10 @@ fn parse_gen(body: &[u8], chat: bool) -> Result<GenParams, String> {
             .unwrap_or("")
             .to_string()
     };
-    let mut max_tokens = j.get("max_tokens").and_then(|v| v.as_usize()).unwrap_or(DEFAULT_MAX_TOKENS);
+    let mut max_tokens = j
+        .get("max_tokens")
+        .and_then(|v| v.as_usize())
+        .unwrap_or(DEFAULT_MAX_TOKENS);
     if max_tokens > MAX_TOKENS_CAP {
         max_tokens = MAX_TOKENS_CAP;
     }
@@ -227,29 +241,47 @@ fn parse_gen(body: &[u8], chat: bool) -> Result<GenParams, String> {
     let top_p = j.get("top_p").and_then(|v| v.as_f64()).unwrap_or(1.0);
     let seed = j.get("seed").and_then(|v| v.as_u64()).unwrap_or(1);
     let stream = j.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
-    Ok(GenParams { prompt, max_tokens, temperature, top_p, seed, stream })
+    Ok(GenParams {
+        prompt,
+        max_tokens,
+        temperature,
+        top_p,
+        seed,
+        stream,
+    })
 }
 
-fn handle_completion(stream: &mut TcpStream, shared: &Arc<Shared>, body: &[u8], chat: bool) -> Result<(), String> {
+fn handle_completion(
+    stream: &mut TcpStream,
+    shared: &Arc<Shared>,
+    body: &[u8],
+    chat: bool,
+) -> Result<(), String> {
+    let started = Instant::now();
     let params = match parse_gen(body, chat) {
         Ok(p) => p,
-        Err(e) => return write_error(stream, 400, "Bad Request", &e),
+        Err(e) => {
+            shared.metrics.record_error();
+            return write_error(stream, 400, "Bad Request", &e);
+        }
     };
     let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = mpsc::channel();
-    let mut tokens = params.prompt.as_bytes().to_vec();
-    if tokens.is_empty() {
-        tokens.push(b't');
-    }
+    let ids = {
+        let g = shared.engine.lock().map_err(|e| e.to_string())?;
+        g.lm.encode(&params.prompt)
+    };
     {
         let mut g = shared.engine.lock().map_err(|e| e.to_string())?;
         g.sched.enqueue(Job {
-            tokens,
+            ids,
             max_new: params.max_tokens,
             n_new: 0,
             temperature: params.temperature,
             top_p: params.top_p,
             rng: Lcg::new(params.seed),
+            caches: None,
+            last_logits: None,
             tx,
         });
         shared.cv.notify_one();
@@ -259,21 +291,25 @@ fn handle_completion(stream: &mut TcpStream, shared: &Arc<Shared>, body: &[u8], 
         let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
         stream.write_all(head.as_bytes()).map_err(|e| e.to_string())?;
         let deadline = Instant::now() + Duration::from_secs(GEN_TIMEOUT_SECS);
+        let mut n_tok = 0u64;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match rx.recv_timeout(left) {
                 Ok(ev) => {
                     if !ev.token.is_empty() {
+                        n_tok += 1;
                         let line = format!("data: {{\"token\":\"{}\"}}\n\n", escape(&ev.token));
                         stream.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
                         stream.flush().ok();
                     }
                     if ev.done {
                         stream.write_all(b"data: [DONE]\n\n").map_err(|e| e.to_string())?;
+                        shared.metrics.record_ok(n_tok, started);
                         break;
                     }
                 }
                 Err(_) => {
+                    shared.metrics.record_error();
                     stream.write_all(b"data: {\"error\":\"timeout\"}\n\n").ok();
                     break;
                 }
@@ -293,18 +329,24 @@ fn handle_completion(stream: &mut TcpStream, shared: &Arc<Shared>, body: &[u8], 
                     break;
                 }
             }
-            Err(_) => return write_error(stream, 408, "Request Timeout", "generation timed out"),
+            Err(_) => {
+                shared.metrics.record_error();
+                return write_error(stream, 408, "Request Timeout", "generation timed out");
+            }
         }
     }
+    shared.metrics.record_ok(text.len() as u64, started);
     let body = if chat {
         format!(
-            "{{\"id\":\"chatcmpl-{id}\",\"object\":\"chat.completion\",\"choices\":[{{\"index\":0,\"message\":{{\"role\":\"assistant\",\"content\":\"{}\"}},\"finish_reason\":\"length\"}}]}}",
-            escape(&text)
+            "{{\"id\":\"chatcmpl-{id}\",\"object\":\"chat.completion\",\"choices\":[{{\"index\":0,\"message\":{{\"role\":\"assistant\",\"content\":\"{}\"}},\"finish_reason\":\"length\"}}],\"usage\":{{\"completion_tokens\":{}}}}}",
+            escape(&text),
+            text.len()
         )
     } else {
         format!(
-            "{{\"id\":\"cmpl-{id}\",\"object\":\"text_completion\",\"choices\":[{{\"index\":0,\"text\":\"{}\",\"finish_reason\":\"length\"}}]}}",
-            escape(&text)
+            "{{\"id\":\"cmpl-{id}\",\"object\":\"text_completion\",\"choices\":[{{\"index\":0,\"text\":\"{}\",\"finish_reason\":\"length\"}}],\"usage\":{{\"completion_tokens\":{}}}}}",
+            escape(&text),
+            text.len()
         )
     };
     write_http(stream, 200, "OK", "application/json", body.as_bytes())
@@ -335,7 +377,7 @@ mod tests {
 
     fn try_exchange(addr: std::net::SocketAddr, req: &str) -> std::io::Result<String> {
         let mut s = TcpStream::connect_timeout(&addr, Duration::from_millis(200))?;
-        s.set_read_timeout(Some(Duration::from_secs(5)))?;
+        s.set_read_timeout(Some(Duration::from_secs(30)))?;
         s.write_all(req.as_bytes())?;
         s.shutdown(Shutdown::Write)?;
         let mut buf = Vec::new();
@@ -356,6 +398,21 @@ mod tests {
     }
 
     #[test]
+    fn metrics_endpoint() {
+        let addr = spawn_server();
+        let body = r#"{"prompt":"hi","max_tokens":2,"temperature":0,"seed":1}"#;
+        let req = format!(
+            "POST /v1/completions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = exchange(addr, &req);
+        let r = exchange(addr, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        assert!(r.contains("200"), "{r}");
+        assert!(r.contains("tokens_total"), "{r}");
+        assert!(r.contains("mean_latency_ms"), "{r}");
+    }
+
+    #[test]
     fn completion_not_echo_and_max_tokens() {
         let addr = spawn_server();
         let body = r#"{"prompt":"hello","max_tokens":5,"temperature":0,"seed":1}"#;
@@ -367,6 +424,7 @@ mod tests {
         assert!(r.contains("200"), "{r}");
         assert!(r.contains("\"text\":"), "{r}");
         assert!(!r.contains("\"text\":\"hello\""), "{r}");
+        assert!(r.contains("\"completion_tokens\":5"), "{r}");
     }
 
     #[test]

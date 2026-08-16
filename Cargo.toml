@@ -2,7 +2,7 @@
 name = "inference-server"
 version = "0.1.0"
 edition = "2021"
-description = "From-scratch HTTP/1.1 inference server: bigram LM + continuous-batching-lite"
+description = "From-scratch HTTP/1.1 inference server: tiny GPT + Orca-style continuous batching"
 
 [[bin]]
 name = "inference-server"
