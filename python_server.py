@@ -154,7 +154,7 @@ def main() -> None:
 
     threading.Thread(target=SCHED.run_forever, daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"python fallback listening on http://{host}:{port} device={DEVICE}", file=sys.stderr)
+    print(f"python backend listening on http://{host}:{port} device={DEVICE}", file=sys.stderr)
     httpd.serve_forever()
 
 

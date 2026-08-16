@@ -27,5 +27,5 @@ if __name__ == "__main__":
         b = q2.get_nowait()
         print(f"  step {step}: jobA={a} jobB={b} active={len(sched.active)}")
     print("start Rust:  cargo run")
-    print("or fallback: python python_server.py 3003")
+    print("or Python backend: python python_server.py 3003")
     print("metrics:     GET /metrics")

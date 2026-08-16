@@ -1,6 +1,6 @@
 # Inference server (Rust)
 
-HTTP/1.1 inference with a **from-scratch tiny decoder-only Transformer** and **Orca-style continuous batching**. Primary code is Rust (`std` only: hand matmuls, no candle/tch/vLLM). `python_server.py` is a fallback if `rustc` is missing; `cargo test` / `cargo build` are the real suite.
+HTTP/1.1 inference with a **from-scratch tiny decoder-only Transformer** and **Orca-style continuous batching**. Primary code is Rust (`std` only: hand matmuls, no candle/tch/vLLM). `python_server.py` is the named Python backend when `rustc`/`cargo` is unavailable; `cargo test` / `cargo build` are the real suite.
 
 ## Implements
 
@@ -53,6 +53,7 @@ HTTP threads only enqueue and wait on that channel. Timeouts live at the HTTP la
 
 ## Papers on disk
 
+- [`papers/yu-orca-2022.pdf`](papers/yu-orca-2022.pdf) — Yu et al. Orca continuous batching (OSDI 2022)
 - [`papers/kwon-vllm-pagedattention-2023.pdf`](papers/kwon-vllm-pagedattention-2023.pdf) — Kwon et al. vLLM / PagedAttention (2023) ([arXiv:2309.06180](https://arxiv.org/abs/2309.06180))
 
 ## Run
@@ -61,7 +62,7 @@ HTTP threads only enqueue and wait on that channel. Timeouts live at the HTTP la
 cargo test
 cargo run                          # LISTEN=127.0.0.1:3003
 python train_export.py --device cpu # regenerate weights if needed
-python python_server.py 3003       # fallback (CPU path)
+python python_server.py 3003       # named Python backend (CPU path)
 python -m pytest test_server.py -q
 python demo.py
 ```

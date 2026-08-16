@@ -1,4 +1,4 @@
-"""HTTP inference-server tests. Prefer the Rust binary; fall back to python_server.py."""
+"""HTTP inference-server tests. Rust binary is the primary path; Python server is a separate named backend when rustc/cargo is unavailable."""
 
 from __future__ import annotations
 
@@ -40,27 +40,26 @@ def _wait_health(port: int, timeout: float = 30.0) -> None:
     raise RuntimeError(f"server did not become healthy: {last}")
 
 
-def _start_rust(port: int) -> subprocess.Popen | None:
-    cargo = _which("cargo")
-    if cargo is None:
-        return None
-    build = subprocess.run([cargo, "build", "--quiet"], cwd=ROOT, capture_output=True, text=True)
-    if build.returncode != 0:
-        print(build.stderr, file=sys.stderr)
-        return None
-    binary = ROOT / "target" / "debug" / "inference-server"
-    if os.name == "nt":
-        binary = binary.with_suffix(".exe")
-    if not binary.exists():
-        return None
-    env = {**os.environ, "LISTEN": f"127.0.0.1:{port}"}
-    return subprocess.Popen([str(binary)], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
 def _which(name: str) -> str | None:
     from shutil import which
 
     return which(name)
+
+
+def _start_rust(port: int) -> subprocess.Popen:
+    cargo = _which("cargo")
+    if cargo is None:
+        raise RuntimeError("cargo not available")
+    build = subprocess.run([cargo, "build", "--quiet"], cwd=ROOT, capture_output=True, text=True)
+    if build.returncode != 0:
+        raise RuntimeError(f"cargo build failed: {build.stderr[-500:]}")
+    binary = ROOT / "target" / "debug" / "inference-server"
+    if os.name == "nt":
+        binary = binary.with_suffix(".exe")
+    if not binary.exists():
+        raise RuntimeError("cargo build succeeded but binary missing")
+    env = {**os.environ, "LISTEN": f"127.0.0.1:{port}"}
+    return subprocess.Popen([str(binary)], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _start_python(port: int) -> subprocess.Popen:
@@ -75,20 +74,21 @@ def _start_python(port: int) -> subprocess.Popen:
 @pytest.fixture(scope="module")
 def base_url():
     port = _free_port()
-    proc = _start_rust(port)
-    backend = "rust"
-    if proc is None:
-        proc = _start_python(port)
+    if _which("cargo") is not None:
+        backend = "rust"
+        proc = _start_rust(port)
+    else:
         backend = "python"
+        proc = _start_python(port)
     try:
         _wait_health(port)
     except Exception:
-        if backend == "rust":
-            proc.terminate()
+        proc.terminate()
+        try:
             proc.wait(timeout=5)
-            proc = _start_python(port)
-            backend = "python"
-            _wait_health(port)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        raise RuntimeError(f"{backend} server failed health check; not switching backends") from None
     yield f"http://127.0.0.1:{port}"
     proc.terminate()
     try:

@@ -1,6 +1,6 @@
 """Python reference: tiny GPT + continuous-batching scheduler + metrics.
 
-Primary implementation is Rust. This mirrors architecture for fallback HTTP and demos.
+Primary implementation is Rust. This mirrors architecture for the named Python HTTP backend and demos.
 Named device paths: pick_device('cpu' | 'mps').
 """
 
