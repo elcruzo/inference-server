@@ -1,0 +1,13 @@
+[package]
+name = "inference-server"
+version = "0.1.0"
+edition = "2021"
+description = "From-scratch HTTP/1.1 inference server: bigram LM + continuous-batching-lite"
+
+[[bin]]
+name = "inference-server"
+path = "src/main.rs"
+
+[lib]
+name = "inference_server"
+path = "src/lib.rs"
