@@ -64,5 +64,5 @@ cargo run                          # LISTEN=127.0.0.1:3003
 python train_export.py --device cpu # regenerate weights if needed
 python python_server.py 3003       # named Python backend (CPU path)
 python -m pytest test_server.py -q
-python demo.py
+python main.py
 ```
