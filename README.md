@@ -34,6 +34,10 @@ Single-threaded scheduler, shared by all connections:
 
 HTTP threads only enqueue and wait on that channel. Timeouts live at the HTTP layer.
 
+## Papers on disk
+
+- [`papers/kwon-vllm-pagedattention-2023.pdf`](papers/kwon-vllm-pagedattention-2023.pdf) — Kwon et al. vLLM / PagedAttention (2023) ([arXiv:2309.06180](https://arxiv.org/abs/2309.06180))
+
 ## Run
 
 ```bash
