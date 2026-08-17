@@ -2,9 +2,30 @@
 
 from __future__ import annotations
 
+import time
 from queue import Queue
 
 from engine import Job, Lcg, LanguageModel, Scheduler, pick_device
+
+
+def _tok_per_s(lm: LanguageModel, prompt: str, max_new: int, *, temperature: float, seed: int) -> float:
+    t0 = time.perf_counter()
+    lm.generate(prompt, max_new, temperature=temperature, top_p=1.0, seed=seed)
+    return max_new / (time.perf_counter() - t0)
+
+
+def _cont_batch_tok_per_s(lm: LanguageModel, *, n_jobs: int, max_new: int, max_batch: int) -> float:
+    sched = Scheduler(lm, max_batch=max_batch)
+    queues = [Queue() for _ in range(n_jobs)]
+    for i, tx in enumerate(queues):
+        sched.enqueue(
+            Job(ids=lm.encode("a "), max_new=max_new, temperature=0.0, top_p=1.0, rng=Lcg(i + 1), tx=tx)
+        )
+    t0 = time.perf_counter()
+    while sched.has_work():
+        sched.step()
+    return (n_jobs * max_new) / (time.perf_counter() - t0)
+
 
 if __name__ == "__main__":
     # Named paths: demo uses cpu; train_export.py exercises mps when available.
@@ -13,6 +34,11 @@ if __name__ == "__main__":
     print("device: cpu")
     print("greedy:", repr(lm.generate("the cat ", 24, temperature=0.0, top_p=1.0, seed=1)))
     print("sampled:", repr(lm.generate("the cat ", 24, temperature=0.9, top_p=0.9, seed=7)))
+
+    single = _tok_per_s(lm, "the cat ", 64, temperature=0.0, seed=1)
+    cont = _cont_batch_tok_per_s(lm, n_jobs=8, max_new=32, max_batch=8)
+    print(f"single-stream tok/s: {single:.0f} (CPU, 64 gen)")
+    print(f"cont-batch tok/s: {cont:.0f} (8x32, max_batch=8)")
 
     sched = Scheduler(lm, max_batch=2)
     q1, q2 = Queue(), Queue()
