@@ -56,6 +56,31 @@ HTTP threads only enqueue and wait on that channel. Timeouts live at the HTTP la
 - [`papers/yu-orca-2022.pdf`](papers/yu-orca-2022.pdf) — Yu et al. Orca continuous batching (OSDI 2022)
 - [`papers/kwon-vllm-pagedattention-2023.pdf`](papers/kwon-vllm-pagedattention-2023.pdf) — Kwon et al. vLLM / PagedAttention (2023) ([arXiv:2309.06180](https://arxiv.org/abs/2309.06180))
 
+## Compared to vLLM / Orca
+
+**What you learn here:**
+- Iteration-level continuous batching (waiting FIFO → active ≤ `max_batch`)
+- Per-job KV cache + one model step per scheduler tick
+- OpenAI-shaped `/v1/completions` with `/metrics` (tok/s, latency)
+
+| | This repo | vLLM / Orca |
+|---|---|---|
+| Engine | Tiny char GPT (Rust/`python_server`) | PagedAttention + continuous batch |
+| Batching | Dense KV, max_batch=8 | Block-table KV, high concurrency |
+| Model | d=32, 2 layers | Llama-scale GPUs |
+
+### Numbers (2026-08-16, Darwin 25.5.0 arm64 / Apple M5)
+
+| Metric | This repo | Baseline | Source |
+|---|---|---|---|
+| Single-stream tok/s | 235 (CPU, 64 gen) | ~71 tok/s Llama-3.1-8B FP16 (1 user, RTX 4090) | SitePoint 2026 Ollama vs vLLM; in-process `LanguageModel` |
+| Cont. batch tok/s | 364 (8×32, max_batch=8) | ~920 tok/s @ 50 users (same 8B FP16) | same; `Scheduler` |
+| Caveat | Toy CPU LM | GPU production | not apples-to-apples |
+
+```bash
+python main.py
+```
+
 ## Run
 
 ```bash
