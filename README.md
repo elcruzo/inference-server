@@ -73,8 +73,8 @@ HTTP threads only enqueue and wait on that channel. Timeouts live at the HTTP la
 
 | Metric | This repo | Baseline | Source |
 |---|---|---|---|
-| Single-stream tok/s | 235 (CPU, 64 gen) | ~71 tok/s Llama-3.1-8B FP16 (1 user, RTX 4090) | SitePoint 2026 Ollama vs vLLM; in-process `LanguageModel` |
-| Cont. batch tok/s | 364 (8×32, max_batch=8) | ~920 tok/s @ 50 users (same 8B FP16) | same; `Scheduler` |
+| Single-stream tok/s | ~4070 (CPU, 64 gen) | ~71 tok/s Llama-3.1-8B FP16 (1 user, RTX 4090) | `python main.py`; SitePoint 2026 (different model/HW) |
+| Cont. batch tok/s | ~4030 (8×32, max_batch=8) | ~920 tok/s @ 50 users (same 8B FP16) | `python main.py`; SitePoint 2026 |
 | Caveat | Toy CPU LM | GPU production | not apples-to-apples |
 
 ```bash
