@@ -1,5 +1,5 @@
 //! Tiny decoder-only GPT: Pre-LN causal MHA + GELU MLP, weight-tied lm_head.
-//! Weights come from `model/tiny_gpt.bin` (trained by `train_export.py`).
+//! Weights from `model/tiny_gpt.bin` (`train_export.py`). Char-level, d=32, handwritten matmuls.
 
 use crate::tensor::{add_inplace, gelu_tanh, layernorm, linear, softmax_inplace};
 

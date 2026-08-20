@@ -8,8 +8,8 @@
 //!   2. for each active job: one model iteration (prefill on first token, else decode)
 //!   3. emit one token event per job; swap-remove finished jobs
 //!
-//! This is iteration-level scheduling (not request-level static batching). KV cache
-//! is per-job; the engine does not wrap vLLM.
+//! Iteration-level scheduling: one model step per active job per tick.
+//! KV is dense and per-job on the tiny CPU GPT.
 
 use std::collections::VecDeque;
 use std::sync::mpsc::Sender;

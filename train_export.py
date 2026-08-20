@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train a tiny char-level GPT and export float32 weights for the Rust server.
 
-Named device paths: --device cpu | mps (no silent fallback when an explicit device is set).
+Named device paths: --device cpu | mps. Unavailable explicit `mps` raises.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ MAX_LEN = 64
 
 
 def pick_device(name: str) -> torch.device:
-    """Named device path. Explicit `mps` / `cpu` must resolve; no silent remap."""
+    """Named device path. Explicit `mps` / `cpu` must resolve; unavailable `mps` raises."""
     key = name.strip().lower()
     if key == "cpu":
         return torch.device("cpu")

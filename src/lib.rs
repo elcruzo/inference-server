@@ -1,4 +1,5 @@
-//! From-scratch HTTP inference server: tiny GPT, continuous batching, SSE, metrics.
+//! HTTP inference server: tiny char GPT, iteration-level continuous batching, SSE, metrics.
+//! std-only Rust: handwritten matmuls, dense per-job KV, waiting FIFO → active ≤ max_batch.
 
 pub mod json;
 pub mod lm;

@@ -33,7 +33,7 @@ DEFAULT_MAX_TOKENS = 16
 
 
 def pick_device(name: str) -> torch.device:
-    """Named device path. Explicit mps/cpu must resolve; no silent remap."""
+    """Named device path. Explicit `mps` / `cpu` must resolve; unavailable `mps` raises."""
     key = name.strip().lower()
     if key == "cpu":
         return torch.device("cpu")

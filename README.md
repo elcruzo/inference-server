@@ -1,6 +1,6 @@
 # Inference server (Rust)
 
-HTTP/1.1 inference with a **from-scratch tiny decoder-only Transformer** and **Orca-style continuous batching**. Primary code is Rust (`std` only: hand matmuls, no candle/tch/vLLM). `python_server.py` is the named Python backend when `rustc`/`cargo` is unavailable; `cargo test` / `cargo build` are the real suite.
+HTTP/1.1 inference with a **tiny decoder-only Transformer** and **Orca-style continuous batching**. Primary code is Rust (`std` only, handwritten matmuls). `python_server.py` is the named Python backend when `rustc`/`cargo` is unavailable; `cargo test` / `cargo build` are the real suite.
 
 ## Implements
 
@@ -8,14 +8,12 @@ HTTP/1.1 inference with a **from-scratch tiny decoder-only Transformer** and **O
 - Iteration-level continuous batching: waiting FIFO → active set (`max_batch=8`) → one decode step per tick with per-job KV cache
 - OpenAI-shaped `/v1/completions` and `/v1/chat/completions` (+ SSE stream)
 - `/metrics` — request counts, tokens, mean latency, tokens/sec, scheduler steps
-- Named device paths for training/Python: `cpu` and `mps` (explicit; no silent remap)
-
-Does **not** wrap vLLM, llama.cpp, or HuggingFace `generate` as the engine.
+- Named device paths for training/Python: `cpu` and `mps` raise if the requested device is unavailable
 
 ## Papers / systems
 
-- Yu et al., *Orca* (OSDI 2022) — iteration-level scheduling / selective batching.
-- Kwon et al., *vLLM* / PagedAttention (2023) — continuous batching + paged KV (we implement scheduling + dense KV, not the pager).
+- Yu et al., *Orca* (OSDI 2022) — iteration-level scheduling. This server admits from a waiting FIFO, runs **one model step per active job per tick**, and keeps a **dense per-job KV** cache.
+- Kwon et al., *vLLM* / PagedAttention (2023) — continuous batching + paged KV. This server implements the iteration-level queue with dense KV.
 - Radford / nanoGPT — decoder-only LM shape for the tiny generator.
 
 ## Routes

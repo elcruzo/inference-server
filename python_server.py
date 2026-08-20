@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fallback HTTP/1.1 server (stdlib). Primary server is the Rust binary."""
+"""Named Python HTTP/1.1 backend (stdlib). Primary server is the Rust binary."""
 
 from __future__ import annotations
 
